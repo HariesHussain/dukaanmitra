@@ -1,10 +1,12 @@
 import os
+import re
 import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from mcp.server.fastmcp import FastMCP
+from rapidfuzz import fuzz
 
 # Define workspace root and load environment variables from .env
 WORKSPACE_ROOT = Path("c:/Users/Admin/Documents/dukaanmitra")
@@ -69,6 +71,65 @@ def get_next_id(sheets, sheet_id, tab_name, col_name, prefix, start_num=1001, pa
         # Fallback without printing credentials/sheet_id
         return f"{prefix}{start_num}" if padding == 0 else f"{prefix}{start_num:0{padding}d}"
 
+def normalize_string(s: str) -> str:
+    """Normalize string by removing all non-alphanumeric characters and converting to lowercase."""
+    return re.sub(r'[^a-z0-9]', '', s.lower())
+
+def resolve_item_row(item: str, rows: list, header: list):
+    """Resolve an item name or ID to a row and index in the inventory sheet using exact and fuzzy matching."""
+    if not rows or len(rows) <= 1:
+        return None, None
+        
+    try:
+        item_id_idx = header.index("item_id")
+        item_name_idx = header.index("item_name")
+    except ValueError:
+        return None, None
+        
+    item_lower = item.strip().lower()
+    item_clean = normalize_string(item)
+    
+    # 1. Exact match checks on ID or Name (case-insensitive, normalized)
+    for idx, row in enumerate(rows[1:], start=1):
+        if len(row) > max(item_id_idx, item_name_idx):
+            row_id = row[item_id_idx].strip().lower()
+            row_name = row[item_name_idx].strip().lower()
+            if row_id == item_lower or row_name == item_lower:
+                return row, idx
+                
+            # Exact clean match
+            if item_clean == normalize_string(row_id) or item_clean == normalize_string(row_name):
+                return row, idx
+                
+    # 2. Fuzzy match checks on name/id using rapidfuzz
+    best_row = None
+    best_row_idx = None
+    best_score = 0.0
+    
+    for idx, row in enumerate(rows[1:], start=1):
+        if len(row) > max(item_id_idx, item_name_idx):
+            row_id = row[item_id_idx].strip()
+            row_name = row[item_name_idx].strip()
+            
+            clean_id = normalize_string(row_id)
+            clean_name = normalize_string(row_name)
+            
+            # Score against ID and Name using rapidfuzz
+            score_id = max(fuzz.ratio(item_clean, clean_id), fuzz.partial_ratio(item_clean, clean_id))
+            score_name = max(fuzz.ratio(item_clean, clean_name), fuzz.partial_ratio(item_clean, clean_name))
+            score = max(score_id, score_name)
+            
+            if score > best_score:
+                best_score = score
+                best_row = row
+                best_row_idx = idx
+                
+    # Threshold for fuzzy match (70% represents a very high quality match)
+    if best_score >= 70.0:
+        return best_row, best_row_idx
+        
+    return None, None
+
 @mcp.tool()
 def get_stock(item: str) -> str:
     """Get the current stock quantity of a given item.
@@ -92,27 +153,7 @@ def get_stock(item: str) -> str:
         except ValueError as e:
             return f"Error: Inventory sheet is missing required columns. Missing: {e}"
             
-        item_lower = item.strip().lower()
-        found_row = None
-        
-        # Try exact match on ID or Name
-        for row in rows[1:]:
-            if len(row) > max(item_id_idx, item_name_idx, stock_qty_idx):
-                row_id = row[item_id_idx].strip().lower()
-                row_name = row[item_name_idx].strip().lower()
-                if row_id == item_lower or row_name == item_lower:
-                    found_row = row
-                    break
-                    
-        # Fallback to substring match on name
-        if found_row is None:
-            for row in rows[1:]:
-                if len(row) > item_name_idx:
-                    row_name = row[item_name_idx].strip().lower()
-                    if item_lower in row_name:
-                        found_row = row
-                        break
-                        
+        found_row, _ = resolve_item_row(item, rows, header)
         if found_row is None:
             return f"Item '{item}' not found in inventory."
             
@@ -143,27 +184,7 @@ def get_price(item: str) -> str:
         except ValueError as e:
             return f"Error: Inventory sheet is missing required columns. Missing: {e}"
             
-        item_lower = item.strip().lower()
-        found_row = None
-        
-        # Try exact match on ID or Name
-        for row in rows[1:]:
-            if len(row) > max(item_id_idx, item_name_idx, price_inr_idx):
-                row_id = row[item_id_idx].strip().lower()
-                row_name = row[item_name_idx].strip().lower()
-                if row_id == item_lower or row_name == item_lower:
-                    found_row = row
-                    break
-                    
-        # Fallback to substring match on name
-        if found_row is None:
-            for row in rows[1:]:
-                if len(row) > item_name_idx:
-                    row_name = row[item_name_idx].strip().lower()
-                    if item_lower in row_name:
-                        found_row = row
-                        break
-                        
+        found_row, _ = resolve_item_row(item, rows, header)
         if found_row is None:
             return f"Item '{item}' not found in inventory."
             
@@ -206,30 +227,7 @@ def create_order(item: str, qty: int, customer: str) -> str:
         except ValueError as e:
             return f"Error: Inventory sheet is missing required columns. Missing: {e}"
             
-        item_lower = item.strip().lower()
-        found_inv_row_idx = None
-        found_inv_row = None
-        
-        # Find item in inventory
-        for idx, row in enumerate(inv_rows[1:], start=1):
-            if len(row) > max(item_id_idx, item_name_idx, stock_qty_idx):
-                row_id = row[item_id_idx].strip().lower()
-                row_name = row[item_name_idx].strip().lower()
-                if row_id == item_lower or row_name == item_lower:
-                    found_inv_row = row
-                    found_inv_row_idx = idx
-                    break
-                    
-        if found_inv_row is None:
-            # Fallback substring match
-            for idx, row in enumerate(inv_rows[1:], start=1):
-                if len(row) > item_name_idx:
-                    row_name = row[item_name_idx].strip().lower()
-                    if item_lower in row_name:
-                        found_inv_row = row
-                        found_inv_row_idx = idx
-                        break
-                        
+        found_inv_row, found_inv_row_idx = resolve_item_row(item, inv_rows, inv_header)
         if found_inv_row is None:
             return f"Error: Item '{item}' not found in inventory."
             
