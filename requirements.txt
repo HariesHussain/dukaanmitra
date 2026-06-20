@@ -1,0 +1,10 @@
+google-adk
+google-genai
+python-dotenv
+google-auth
+google-api-python-client
+mcp
+rapidfuzz
+fastapi
+uvicorn
+pydantic

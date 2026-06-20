@@ -7,3 +7,4 @@ node_modules/
 *.log
 test_logs/
 dukaanmitra-credentials.json
+.streamlit/secrets.toml

@@ -3,17 +3,17 @@ import sys
 from pathlib import Path
 
 # Add project root to sys.path to allow importing mcp_server
-PROJECT_ROOT = Path("c:/Users/Admin/Documents/dukaanmitra")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from google.adk import Agent
-from mcp_server.sheet_mcp_server import get_stock, get_price, create_order
+from mcp_server.sheet_mcp_server import get_stock, get_price, create_order, get_order_status
 
 # Define the Agent
 inventory_order_agent = Agent(
     name="inventory_order_agent",
-    model="gemini-2.5-flash",
+    model="gemini-flash-latest",
     instruction="""You are the Inventory and Order Agent for DukaanMitra, an AI assistant for small Indian businesses.
 Your role is to check stock and prices of items, and to place orders. You must be precise, helpful, and follow these rules:
 
@@ -32,7 +32,10 @@ RULES:
    - If the customer's name is not specified in the conversation, ask the customer for their name before creating the order.
    - Once the order is successfully created, summarize the order details and explicitly confirm the generated Order ID (e.g. ORD1001) to the customer.
    - If stock is insufficient, tell the customer you cannot place the order and state the available stock quantity returned by the tool.
-6. Use a friendly, polite tone. Use Rs. or Rupees for currency.
+6. When checking order status:
+   - Call the `get_order_status` tool with the Order ID.
+   - Answer using the exact status returned by the tool. If the order is not found, say so.
+7. Use a friendly, polite tone. Use Rs. or Rupees for currency.
 """,
-    tools=[get_stock, get_price, create_order]
+    tools=[get_stock, get_price, create_order, get_order_status]
 )

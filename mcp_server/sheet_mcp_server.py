@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from rapidfuzz import fuzz
 
 # Define workspace root and load environment variables from .env
-WORKSPACE_ROOT = Path("c:/Users/Admin/Documents/dukaanmitra")
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = WORKSPACE_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
@@ -333,6 +333,38 @@ def create_order(item: str, qty: int, customer: str) -> str:
         return f"Order {order_id} confirmed. Customer '{customer}' ({customer_id}) ordered {qty} units of '{item_name}' ({item_id}). Remaining stock: {new_stock}."
     except Exception as e:
         return f"Error creating order: {str(e)}"
+
+@mcp.tool()
+def get_order_status(order_id: str) -> str:
+    """Get the status of an order by its ID.
+
+    Args:
+        order_id: The ID of the order (e.g. ORD1001).
+    """
+    try:
+        sheets, sheet_id = get_sheets_service()
+        # Read Orders tab
+        result = sheets.values().get(spreadsheetId=sheet_id, range="'Orders'!A:E").execute()
+        rows = result.get("values", [])
+        if not rows or len(rows) <= 1:
+            return f"Order '{order_id}' not found."
+            
+        header = [h.strip().lower() for h in rows[0]]
+        try:
+            order_id_idx = header.index("order_id")
+            status_idx = header.index("status")
+        except ValueError as e:
+            return f"Error: Orders sheet is missing required columns. Missing: {e}"
+            
+        order_lower = order_id.strip().lower()
+        for row in rows[1:]:
+            if len(row) > max(order_id_idx, status_idx):
+                if row[order_id_idx].strip().lower() == order_lower:
+                    return f"Order {row[order_id_idx]} status: {row[status_idx]}."
+                    
+        return f"Order '{order_id}' not found."
+    except Exception as e:
+        return f"Error connecting to sheet: {str(e)}"
 
 @mcp.tool()
 def log_escalation(reason: str, context: str) -> str:
